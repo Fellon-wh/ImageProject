@@ -5,16 +5,25 @@ import java.net.MalformedURLException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.http.HttpStatus;
+import org.hibernate.Query;
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.hibernate.Transaction;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.support.ClassPathXmlApplicationContext;
+
+import com.feilong.spider.getURL.vo.URL;
 
 public class URLUtil {
 	public static final Log log = LogFactory.getLog(URLUtil.class);
@@ -24,9 +33,9 @@ public class URLUtil {
 	 * 
 	 * @Description: TODO(爬取网页中的URL)
 	 * @param url 地址
-	 * @return
+	 * @return List<URL> URL集合
 	 */
-	public String SpiderURL(String href) {
+	public List<URL> SpiderURL(String href) {
 		String absHref = null;
 		Connection con;
 		if(href!=null&&href!="") {    //判断 href 地址是否有效
@@ -37,26 +46,22 @@ public class URLUtil {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			System.out.println("state..."+state);
-			if(state != HttpStatus.SC_OK) {
+			if(state != HttpStatus.SC_OK) {  //判断连接状态-->200
 				return null;
 			}
 		}else {
-			return "kk";
+			return null;
 		}
 		try {
 			Document doc = con.timeout(5000).get();
 			Elements links = doc.select("a[href]");   //带有 href 属性的 a 元素
 			for (Element link : links) {
 				absHref = link.attr("abs:href");      //相对路径
-				System.out.println("相对路径: "+absHref);
 				URL url = contentOfURL(absHref);
 				if(url == null) {
 					continue;
 				}
 				urls.add(url);
-				System.out.println(urls.size()+"\n"+url.getUrl()
-						+"\n"+url.getTitle()+"\n"+url.getDescription());
 			}
 		}catch (MalformedURLException e) {
 			log.error(e);
@@ -72,7 +77,7 @@ public class URLUtil {
 	        log.error(e);    
 	        return null;
 		}
-		return absHref;
+		return urls;
 	}
 	
 	/**
@@ -82,6 +87,9 @@ public class URLUtil {
 	 * @return URL对象
 	 */
 	public URL contentOfURL(String href) {
+		if(href.endsWith("/")) {
+			href = href.substring(0, href.length()-1);
+		}
 		URL url = new URL();
 		Connection con;
 		if(href!=null && href!="") {    //判断 href 地址是否有效
@@ -92,7 +100,6 @@ public class URLUtil {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			System.out.println("state....."+state);
 			if(state != HttpStatus.SC_OK) {
 				return null;
 			}
@@ -127,10 +134,41 @@ public class URLUtil {
 		return url;
 	}
 	
+	/**
+	 * 
+	 * @Description: TODO(通过HashSet删除重复元素)
+	 * @param urls Lis<URL> 集合
+	 * @return Lis<URL> 集合
+	 */
+	public List<URL> getNewList(List<URL> urls){
+		HashSet<URL> h = new HashSet<URL>(urls);
+		urls.clear();
+		urls.addAll(h);
+		return urls;
+	}
+	
 	public static void main(String[] args) {
-		String url = "http://www.nipic.com/topic/show_27055_1.html";
+		String href = "http://www.nipic.com";
 		URLUtil urlUtil = new URLUtil();
-		String href = urlUtil.SpiderURL(url);
-		System.out.println(href);
+		List<URL> urls = urlUtil.SpiderURL(href);
+		@SuppressWarnings("resource")
+		ApplicationContext context = new ClassPathXmlApplicationContext("applicationContext.xml");
+		SessionFactory sessionFactory = (SessionFactory)context.getBean("sessionFactory");
+		Session session = sessionFactory.openSession();
+		Transaction tx = session.beginTransaction();
+		for (URL url : urls) {  //first remove duplication
+			String hql = "select u.id from URL u where u.url = ?";
+			System.out.println(hql);
+			Query query = session.createQuery(hql);
+			query.setString(0, url.getUrl());
+			
+	        System.out.println(url.getUrl()+"\n"+url.getTitle()+"\n"+url.getDescription());
+	        if(query.list().size()==0) {  //如果不存在 则 insert
+	        	session.save(url);
+	        }
+		}
+		tx.commit();
+		session.close();
+		sessionFactory.close();
 	}
 }
